@@ -1,0 +1,3 @@
+ADD --chown=www-data http://example.com/test ./
+ADD --chown=www-data --chown=root https://example.com/test ./
+ADD http://xyz.example.net/test ./

@@ -1,0 +1,7 @@
+# these are URLs, but Docker shouldn't read them (and is supposed to treat them as filenames)
+ADD --chown=www-data ftp://example.com/test ./
+ADD --chown=www-data --chown=root ftp://example.com/test ./
+ADD ssh://xyz.example.net/test ./
+
+# copy doesn't support remote URLs, so this is a filename too :D
+COPY https://example.com/test ./

@@ -1,0 +1,16 @@
+# escape = `
+FROM debian:stretch-slim
+
+# this is not actually a parser directive: (not at top of the file)
+# syntax = totally/fine:syntax
+
+RUN `
+    foo `
+	bar `
+baz
+
+# these are naughty, but they're commented so shouldn't be matched
+#RUN chmod ...
+# RUN chown ...
+
+# vim:set ft=dockerfile:

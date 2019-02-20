@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+[ "$#" -le 1 ]
+df="$(cat "$@")"
+dfName="${1:-${DOCKERFILE_VALIDATOR_LABEL:-stdin}}"
+
+# TODO embed links to explain each "oh no"
+
+oh_no() {
+	{
+		echo "oh no: $dfName:" "$@"
+		echo
+	} >&2
+}
+oh_no_context() {
+	local message="$1"; shift
+	local instruction="$1"; shift
+	local IFS=$'\n'
+	oh_no "$message"$'\n'"$(sed -e 's/^/  '"$instruction"' /' <<<"$*")"
+}
+
+# https://github.com/moby/buildkit/blob/v0.3.3/frontend/dockerfile/dockerfile2llb/directives.go
+_parser_directive() {
+	local directive="$1"; shift
+
+	gawk -v directive="$directive" '
+		match($0, /^#\s*([a-zA-Z][a-zA-Z0-9]*)\s*=\s*(.+?)\s*$/, m) {
+			if (m[1] == directive) {
+				print m[2]
+				found = 1
+				exit
+			}
+			next
+		}
+		{ exit }
+		END {
+			exit(found ? 0 : 1)
+		}
+	' <<<"$df"
+}
+
+# check "parser directives" for "syntax=" to complain about custom Dockerfile syntax
+if syntax="$(_parser_directive 'syntax')"; then
+	oh_no "custom syntax in use! ('$syntax')"
+	exit 1 # custom syntax means we can't assume it's standard Dockerfile syntax and the rest of our checks are MOOOOOOO(t)
+fi
+
+escape="$(_parser_directive 'escape' || echo '\')"
+# should be one of \ or ` (https://github.com/moby/buildkit/blob/v0.3.3/frontend/dockerfile/parser/parser.go#L102)
+[ "$escape" = '\' ] || [ "$escape" = '`' ]
+[ "${#escape}" = 1 ]
+escapeRegex="${escape//\\/\\\\}"'[[:space:]]*'
+
+_flatten() {
+	gawk -v line='' '
+		/^[[:space:]]*#/ {
+			gsub(/^[[:space:]]+/, "")
+			print
+			next
+		}
+		{
+			if (match($0, /^(.*)('"$escapeRegex"')$/, m)) {
+				line = line m[1]
+				next
+			}
+			print line $0
+			line = ""
+		}
+	' <<<"$df"
+}
+
+flatDf="$(_flatten)"
+df="$flatDf"
+
+_filter() {
+	local instruction="$1"; shift
+
+	gawk -v instruction="$instruction" -v IGNORECASE=1 '
+		tolower(instruction) == tolower($1) {
+			gsub("^" instruction "[[:space:]]+", "")
+			print
+		}
+	' <<<"$df"
+}
+
+runs="$(_filter 'RUN')"
+if chowns="$(grep -E '^ch(own|mod)[[:space:]]+.*' <<<"$runs")" && [ -n "$chowns" ]; then
+	# https://github.com/moby/moby/issues/783#issuecomment-19237045
+	oh_no_context "'RUN chown'/'RUN chmod' in use!" 'RUN' "$chowns"
+	#oh_no "'RUN chown'/'RUN chmod' in use!"$'\n'"$(sed -e 's/^/  RUN /' <<<"$chowns")"
+fi
+if aptkeys="$(grep -E 'apt-key[[:space:]]+(add|adv)' <<<"$runs")" && [ -n "$aptkeys" ]; then
+	# https://manpages.debian.org/apt-key#COMMANDS ("Instead of using this command ...")
+	oh_no_context "'RUN apt-key add|adv' in use!" 'RUN' "$aptkeys"
+fi
+if gpgs="$(grep -E '(^|[;|&])[[:space:]]*gpg[[:space:]]+[^;|&]*' <<<"$runs" | grep -vE '(^|[;|&])[[:space:]]*gpg[[:space:]]+[^;|&]*--batch[^;|&]*')" && [ -n "$gpgs" ]; then
+	# https://github.com/docker-library/busybox/pull/55
+	# https://bugs.debian.org/913614 esp. https://bugs.debian.org/913614#27 ("PS --batch everywhere")
+	oh_no_context "'RUN gpg ...' in use without '--batch'!" 'RUN' "$gpgs"
+fi
+
+adds="$(_filter 'ADD')"
+# https://github.com/moby/moby/blob/740349757396d8f1ad573d4b78148baca9c979aa/pkg/urlutil/urlutil.go#L12 (valid prefixes for ADD <url>)
+if urls="$(grep -E '^(--[^[:space:]]*[[:space:]]+)*https?://' <<<"$adds")" && [ -n "$urls" ]; then
+	# TODO find a good link that explains why this is bad
+	# https://github.com/moby/moby/issues/15717 (cache has to redownload every time)
+	# https://github.com/docker-library/official-images#image-build (checksums, signatures, verification)
+	oh_no_context "'ADD' with a remote URL in use!" 'ADD' "$urls"
+fi
+
+labels="$(_filter 'LABEL')"
+if nodots="$(grep -E '(^|[[:space:]]+)[^.=[:space:]]+=' <<<"$labels")" && [ -n "$nodots" ]; then
+	# https://docs.docker.com/config/labels-custom-metadata/#key-format-recommendations
+	# https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys
+	oh_no_context "'LABEL' without reverse DNS in use!" 'LABEL' "$nodots"
+fi

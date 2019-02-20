@@ -112,6 +112,7 @@ fi
 labels="$(_filter 'LABEL')"
 if nodots="$(grep -E '(^|[[:space:]]+)[^.=[:space:]]+=' <<<"$labels")" && [ -n "$nodots" ]; then
 	# https://docs.docker.com/config/labels-custom-metadata/#key-format-recommendations
+	# https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#rules
 	# https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys
 	oh_no_context "'LABEL' without reverse DNS in use!" 'LABEL' "$nodots"
 fi

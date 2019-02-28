@@ -121,6 +121,7 @@ fi
 
 maintainer="$(_filter 'MAINTAINER')"
 if [ -n "$maintainer" ]; then
+	# https://github.com/moby/moby/pull/25466 + https://github.com/moby/moby/pull/32700
 	# https://docs.docker.com/engine/reference/builder/#maintainer-deprecated
 	# https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys ("org.opencontainers.image.authors")
 	oh_no_context "'MAINTAINER' (deprecated) in use!" 'MAINTAINER' "$maintainer"

@@ -1,0 +1,11 @@
+FROM bash
+
+LABEL foo=bar=baz \
+	foo"bar"baz=foo"=bar="baz \
+	foo="bar baz" \
+	"foo bar"="b""a""z" \
+	"foo"="bar"="foo=bar baz=foobar" \
+	" foo \
+		bar \
+		baz"="foo \" bar \
+		baz"" "

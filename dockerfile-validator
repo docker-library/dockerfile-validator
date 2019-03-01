@@ -109,15 +109,135 @@ if urls="$(grep -E '^(--[^[:space:]]*[[:space:]]+)*https?://' <<<"$adds")" && [ 
 	oh_no_context "'ADD' with a remote URL in use!" 'ADD' "$urls"
 fi
 
-labels="$(_filter 'LABEL')"
-if nodots="$(grep -oE '(^|[[:space:]]+)[^.=[:space:]]+=' <<<"$labels")" && [ -n "$nodots" ]; then
-	# https://docs.docker.com/config/labels-custom-metadata/#key-format-recommendations
-	# https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#rules
+declare -A labelSeen=()
+labelKeys=()
+declare -A labelVals=()
+_parse_labels() {
+	# parse each label into an individual line
+	local labels
+	labels="$(_filter 'LABEL')"
+
+	local textRegex='([^"[:space:]]+?)|"((\\.|[^"])*?)"'
+	local sedTextRegex='s/'"$textRegex"'/\1\2/g; s/\\(.)/\1/g'
+
+	local IFS=$'\n' line
+	for line in $labels; do
+		# check for simple "LABEL key val" style first
+		local key val
+		key="$(grep -oP '^[[:space:]]*('"$textRegex"')+([[:space:]]+|$)' <<<"$line")"
+		if [ -n "$key" ] && [[ "$key" != *=* ]]; then
+			# must be "LABEL key val" (no "=")
+			val="${line#$key}"
+			key="$(sed -r 's/^[[:space:]]+//; s/[[:space:]]+$//' <<<"$key")"
+
+			key="$(sed -r "$sedTextRegex" <<<"$key")"
+			val="$(sed -r "$sedTextRegex" <<<"$val")"
+
+			if [ -z "${labelSeen[$key]:-}" ]; then
+				labelSeen[$key]=1
+				labelKeys+=( "$key" )
+			fi
+			labelVals[$key]="$val"
+			continue
+		fi
+
+		local split
+		split="$(
+			grep -oP '('"$textRegex"')+?=('"$textRegex"')+([[:space:]]+|$)' <<<"$line" \
+				| sed -r 's/[[:space:]]+$//'
+		)"
+
+		local keyVal
+		for keyVal in $split; do
+			key="$(grep -oP '^('"$textRegex"')+?=' <<<"$keyVal")"
+			val="${keyVal#$key}"
+			key="${key%=}"
+
+			key="$(sed -r "$sedTextRegex" <<<"$key")"
+			val="$(sed -r "$sedTextRegex" <<<"$val")"
+
+			if [ -z "${labelSeen[$key]:-}" ]; then
+				labelSeen[$key]=1
+				labelKeys+=( "$key" )
+			fi
+			labelVals[$key]="$val"
+		done
+	done
+}
+
+# https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys
+declare -A labelSuggestions=(
+	[maintainer]='org.opencontainers.image.authors'
+	[repository]='org.opencontainers.image.source'
+
+	# https://github.com/label-schema/label-schema.org#readme
+	# https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#back-compatibility-with-label-schema
+	[org.label-schema.build-date]='org.opencontainers.image.created'
+	[org.label-schema.url]='org.opencontainers.image.url'
+	[org.label-schema.vcs-url]='org.opencontainers.image.source'
+	[org.label-schema.version]='org.opencontainers.image.version'
+	[org.label-schema.vcs-ref]='org.opencontainers.image.revision'
+	[org.label-schema.vendor]='org.opencontainers.image.vendor'
+	[org.label-schema.name]='org.opencontainers.image.title'
+	[org.label-schema.description]='org.opencontainers.image.description'
+)
+declare -A ociLabels=(
 	# https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys
-	oh_no_context "'LABEL' without reverse DNS in use!" 'LABEL' "$nodots"
-fi
-# TODO validate that all "org.opencontainers.image.*" labels are valid and in the correct format (https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys)
-# TODO suggest OCI alternatives for deprecated "org.label-schema.*" labels
+	[org.opencontainers.image.created]=1
+	[org.opencontainers.image.authors]=1
+	[org.opencontainers.image.url]=1
+	[org.opencontainers.image.documentation]=1
+	[org.opencontainers.image.source]=1
+	[org.opencontainers.image.version]=1
+	[org.opencontainers.image.revision]=1
+	[org.opencontainers.image.vendor]=1
+	[org.opencontainers.image.licenses]=1
+	[org.opencontainers.image.ref.name]=1
+	[org.opencontainers.image.title]=1
+	[org.opencontainers.image.description]=1
+)
+
+_parse_labels
+for labelKey in "${labelKeys[@]}"; do
+	labelVal="${labelVals[$labelKey]}"
+
+	labelContext="$labelKey $labelVal"
+
+	if [[ "$labelVal" == '='* ]]; then
+		# https://github.com/CentOS/sig-cloud-instance-images/blob/0cea32a0018ac2d874960d9378a9745bf92affd2/docker/Dockerfile#L4 😂
+		oh_no_context "'LABEL $labelKey' value starts with '='; likely a misplaced space?" 'LABEL' "$labelContext"
+	fi
+
+	if [ -n "${labelSuggestions[$labelKey]:-}" ]; then
+		# https://docs.docker.com/config/labels-custom-metadata/#key-format-recommendations
+		# https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys
+		oh_no_context "'LABEL $labelKey' should be replaced with 'LABEL ${labelSuggestions[$labelKey]}'" 'LABEL' "$labelContext"
+		continue
+	fi
+
+	if [[ "$labelKey" != *.* ]]; then
+		# https://docs.docker.com/config/labels-custom-metadata/#key-format-recommendations
+		# https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#rules
+		oh_no_context "'LABEL $labelKey' should use full reverse DNS style key ('LABEL org.example...')" 'LABEL' "$labelContext"
+		continue
+	fi
+
+	case "$labelKey" in
+		org.label-schema.*)
+			# https://github.com/label-schema/label-schema.org#readme
+			oh_no_context "deprecated Label Schema 'LABEL $labelKey' in use!" 'LABEL' "$labelContext"
+			continue
+			;;
+
+		org.opencontainers.*)
+			if [ -z "${ociLabels[$labelKey]:-}" ]; then
+				# https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys
+				oh_no_context "undefined OCI annotation key 'LABEL $labelKey' in use!" 'LABEL' "$labelContext"
+				continue
+			fi
+			;;
+	esac
+done
 
 maintainer="$(_filter 'MAINTAINER')"
 if [ -n "$maintainer" ]; then

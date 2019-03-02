@@ -5,19 +5,56 @@ set -Eeuo pipefail
 df="$(cat "$@")"
 dfName="${1:-${DOCKERFILE_VALIDATOR_LABEL:-stdin}}"
 
-# TODO embed links to explain each "oh no"
+# https://www.gnu.org/software/bash/manual/bashref.html#Exit-Status ("When a command terminates on a fatal signal whose number is N, Bash uses the value 128+N as the exit status. If a command is not found, the child process created to execute it returns a status of 127. If a command is found but is not executable, the return status is 126.")
+maxExitCode=125
+maxErrors="$(( maxExitCode - 1))" # save the biggest number for script errors
 
-oh_no() {
-	{
-		echo "oh no: $dfName:" "$@"
-		echo
-	} >&2
+declare -A colors=(
+	[reset]=''
+	[ohno]=''
+	[file]=''
+	[message]=''
+	[labels]=''
+	[urls]=''
+	[refs]=''
+)
+if [ -t 1 ] && command -v tput > /dev/null && tput setaf 1 &> /dev/null; then
+	colors[reset]='\e[m'
+	colors[ohno]='\e[0;31m'
+	colors[file]='\e[0;34m'
+	colors[message]='\e[1;31m'
+	colors[labels]='\e[0;37m'
+	colors[urls]='\e[0;32m'
+	colors[refs]='\e[1;30m'
+fi
+_color() {
+	local color="${colors[$1]:-}"
+	echo -ne "$color"
 }
+
+ohNoes=0
 oh_no_context() {
+	(( ohNoes++ )) || :
+
 	local message="$1"; shift
-	local instruction="$1"; shift
-	local IFS=$'\n'
-	oh_no "$message"$'\n'"$(sed -e 's/^/  '"$instruction"' /' <<<"$*")"
+	echo "$(_color ohno)oh no$(_color reset): $(_color file)$dfName$(_color reset): $(_color message)$message$(_color reset)"
+	if [ "$#" -gt 0 ]; then
+		[ "$1" = '--' ] || echo >&2 "  $(_color labels)urls:$(_color reset)"
+		while [ "$#" -gt 0 ]; do
+			local url="$1"; shift
+			[ "$url" != '--' ] || break
+			echo "    - $(_color urls)$url$(_color reset)"
+		done
+		if [ "$#" -gt 0 ]; then
+			local instruction="$1"; shift
+			echo "  $(_color labels)refs:$(_color reset)"
+			while [ "$#" -gt 0 ]; do
+				local line="$1"; shift
+				echo "    $(_color refs)$instruction $line$(_color reset)"
+			done
+		fi
+	fi
+	echo
 }
 
 # https://github.com/moby/buildkit/blob/v0.3.3/frontend/dockerfile/dockerfile2llb/directives.go
@@ -42,8 +79,8 @@ _parser_directive() {
 
 # check "parser directives" for "syntax=" to complain about custom Dockerfile syntax
 if syntax="$(_parser_directive 'syntax')"; then
-	oh_no "custom syntax in use! ('$syntax')"
-	exit 1 # custom syntax means we can't assume it's standard Dockerfile syntax and the rest of our checks are MOOOOOOO(t)
+	echo >&2 "error: custom syntax in use! ('$syntax'); can't parse Dockerfile!"
+	exit "$maxExitCode" # custom syntax means we can't assume it's standard Dockerfile syntax and the rest of our checks are MOOOOOOO(t)
 fi
 
 escape="$(_parser_directive 'escape' || echo '\')"
@@ -86,27 +123,30 @@ _filter() {
 
 runs="$(_filter 'RUN')"
 if chowns="$(grep -E '^ch(own|mod)[[:space:]]+.*' <<<"$runs")" && [ -n "$chowns" ]; then
-	# https://github.com/moby/moby/issues/783#issuecomment-19237045
-	oh_no_context "'RUN chown'/'RUN chmod' in use!" 'RUN' "$chowns"
-	#oh_no "'RUN chown'/'RUN chmod' in use!"$'\n'"$(sed -e 's/^/  RUN /' <<<"$chowns")"
+	oh_no_context "'RUN chown'/'RUN chmod' in use!" \
+		'https://github.com/moby/moby/issues/783#issuecomment-19237045' \
+		'--' 'RUN' "$chowns"
 fi
 if aptkeys="$(grep -E 'apt-key[[:space:]]+(add|adv)' <<<"$runs")" && [ -n "$aptkeys" ]; then
-	# https://manpages.debian.org/apt-key#COMMANDS ("Instead of using this command ...")
-	oh_no_context "'RUN apt-key add|adv' in use!" 'RUN' "$aptkeys"
+	oh_no_context "'RUN apt-key add|adv' in use!" \
+		'https://manpages.debian.org/apt-key#COMMANDS ("Instead of using this command ... /etc/apt/trusted.gpg.d/ ...")' \
+		'--' 'RUN' "$aptkeys"
 fi
 if gpgs="$(grep -E '(^|[;|&])[[:space:]]*gpg[[:space:]]+[^;|&]*' <<<"$runs" | grep -vE '(^|[;|&])[[:space:]]*gpg[[:space:]]+[^;|&]*--batch[^;|&]*')" && [ -n "$gpgs" ]; then
-	# https://github.com/docker-library/busybox/pull/55
-	# https://bugs.debian.org/913614 esp. https://bugs.debian.org/913614#27 ("PS --batch everywhere")
-	oh_no_context "'RUN gpg ...' in use without '--batch'!" 'RUN' "$gpgs"
+	oh_no_context "'RUN gpg ...' in use without '--batch'!" \
+		'https://bugs.debian.org/913614#27 ("PS --batch everywhere for API mode")' \
+		'https://github.com/docker-library/busybox/pull/55' \
+		'--' 'RUN' "$gpgs"
 fi
 
 adds="$(_filter 'ADD')"
 # https://github.com/moby/moby/blob/740349757396d8f1ad573d4b78148baca9c979aa/pkg/urlutil/urlutil.go#L12 (valid prefixes for ADD <url>)
 if urls="$(grep -E '^(--[^[:space:]]*[[:space:]]+)*https?://' <<<"$adds")" && [ -n "$urls" ]; then
-	# TODO find a good link that explains why this is bad
-	# https://github.com/moby/moby/issues/15717 (cache has to redownload every time)
-	# https://github.com/docker-library/official-images#image-build (checksums, signatures, verification)
-	oh_no_context "'ADD' with a remote URL in use!" 'ADD' "$urls"
+	# TODO find a better link that explains why this is bad
+	oh_no_context "'ADD' with a remote URL in use!" \
+		'https://github.com/moby/moby/issues/15717 (cache has to redownload every time)' \
+		'https://github.com/docker-library/official-images#image-build (checksums, signatures, verification)' \
+		'--' 'ADD' "$urls"
 fi
 
 declare -A labelSeen=()
@@ -205,34 +245,41 @@ for labelKey in "${labelKeys[@]}"; do
 
 	if [[ "$labelVal" == '='* ]]; then
 		# https://github.com/CentOS/sig-cloud-instance-images/blob/0cea32a0018ac2d874960d9378a9745bf92affd2/docker/Dockerfile#L4 😂
-		oh_no_context "'LABEL $labelKey' value starts with '='; likely a misplaced space?" 'LABEL' "$labelContext"
+		oh_no_context "'LABEL $labelKey' value starts with '='; likely a misplaced space?" \
+			'https://github.com/docker-library/repo-info/blob/175a6702073f22907ad8db1d5a7c7d2dd32ee4fe/repos/centos/local/7.5.1804.md' \
+			'--' 'LABEL' "$labelContext"
 	fi
 
 	if [ -n "${labelSuggestions[$labelKey]:-}" ]; then
-		# https://docs.docker.com/config/labels-custom-metadata/#key-format-recommendations
-		# https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys
-		oh_no_context "'LABEL $labelKey' should be replaced with 'LABEL ${labelSuggestions[$labelKey]}'" 'LABEL' "$labelContext"
+		oh_no_context "'LABEL $labelKey' should be replaced with 'LABEL ${labelSuggestions[$labelKey]}'" \
+			'https://docs.docker.com/config/labels-custom-metadata/#key-format-recommendations' \
+			'https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys' \
+			'--' 'LABEL' "$labelContext"
 		continue
 	fi
 
 	if [[ "$labelKey" != *.* ]]; then
-		# https://docs.docker.com/config/labels-custom-metadata/#key-format-recommendations
-		# https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#rules
-		oh_no_context "'LABEL $labelKey' should use full reverse DNS style key ('LABEL org.example...')" 'LABEL' "$labelContext"
+		oh_no_context "'LABEL $labelKey' should use full reverse DNS style key ('LABEL org.example...')" \
+			'https://docs.docker.com/config/labels-custom-metadata/#key-format-recommendations' \
+			'https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#rules' \
+			'--' 'LABEL' "$labelContext"
 		continue
 	fi
 
 	case "$labelKey" in
 		org.label-schema.*)
-			# https://github.com/label-schema/label-schema.org#readme
-			oh_no_context "deprecated Label Schema 'LABEL $labelKey' in use!" 'LABEL' "$labelContext"
+			oh_no_context "deprecated Label Schema 'LABEL $labelKey' in use!" \
+				'https://github.com/label-schema/label-schema.org#readme' \
+				'https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys' \
+				'--' 'LABEL' "$labelContext"
 			continue
 			;;
 
 		org.opencontainers.*)
 			if [ -z "${ociLabels[$labelKey]:-}" ]; then
-				# https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys
-				oh_no_context "undefined OCI annotation key 'LABEL $labelKey' in use!" 'LABEL' "$labelContext"
+				oh_no_context "undefined OCI annotation key 'LABEL $labelKey' in use!" \
+					'https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys' \
+					'--' 'LABEL' "$labelContext"
 				continue
 			fi
 			;;
@@ -241,8 +288,14 @@ done
 
 maintainer="$(_filter 'MAINTAINER')"
 if [ -n "$maintainer" ]; then
-	# https://github.com/moby/moby/pull/25466 + https://github.com/moby/moby/pull/32700
-	# https://docs.docker.com/engine/reference/builder/#maintainer-deprecated
-	# https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys
-	oh_no_context "deprecated 'MAINTAINER' in use! (consider 'LABEL org.opencontainers.image.authors=')" 'MAINTAINER' "$maintainer"
+	oh_no_context "deprecated 'MAINTAINER' in use! (consider 'LABEL org.opencontainers.image.authors=')" \
+		'https://docs.docker.com/engine/reference/builder/#maintainer-deprecated' \
+		'https://github.com/moby/moby/pull/25466 + https://github.com/moby/moby/pull/32700' \
+		'https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys' \
+		'--' 'MAINTAINER' "$maintainer"
 fi
+
+if [ "$ohNoes" -gt "$maxErrors" ]; then
+	ohNoes="$maxErrors"
+fi
+exit "$ohNoes"

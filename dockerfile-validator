@@ -47,10 +47,11 @@ oh_no_context() {
 		done
 		if [ "$#" -gt 0 ]; then
 			local instruction="$1"; shift
+			[ -z "$instruction" ] || instruction+=' '
 			echo "  $(_color labels)refs:$(_color reset)"
-			while [ "$#" -gt 0 ]; do
-				local line="$1"; shift
-				echo "    $(_color refs)$instruction $line$(_color reset)"
+			local IFS=$'\n' line
+			for line in $*; do
+				echo "    $(_color refs)$instruction$line$(_color reset)"
 			done
 		fi
 	fi
@@ -293,6 +294,12 @@ if [ -n "$maintainer" ]; then
 		'https://github.com/moby/moby/pull/25466 + https://github.com/moby/moby/pull/32700' \
 		'https://github.com/opencontainers/image-spec/blob/v1.0.1/annotations.md#pre-defined-annotation-keys' \
 		'--' 'MAINTAINER' "$maintainer"
+fi
+
+if debianFrontend="$(grep 'DEBIAN_FRONTEND' <<<"$df")" && [ -n "$debianFrontend" ]; then
+	oh_no_context "'DEBIAN_FRONTEND' detected; is it really necessary?" \
+		'https://github.com/moby/moby/issues/4032#issuecomment-34597177' \
+		'--' '' "$debianFrontend"
 fi
 
 if [ "$ohNoes" -gt "$maxErrors" ]; then

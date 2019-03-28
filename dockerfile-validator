@@ -128,7 +128,7 @@ if chowns="$(grep -E '^ch(own|mod)[[:space:]]+.*' <<<"$runs")" && [ -n "$chowns"
 		'https://github.com/moby/moby/issues/783#issuecomment-19237045' \
 		'--' 'RUN' "$chowns"
 fi
-if aptkeys="$(grep -E 'apt-key[[:space:]]+(add|adv)' <<<"$runs")" && [ -n "$aptkeys" ]; then
+if aptkeys="$(grep -E '(^|[;|&])[[:space:]]*apt-key[[:space:]]+(-[^[:space:]]*[[:space:]]+)*(add|adv)' <<<"$runs")" && [ -n "$aptkeys" ]; then
 	oh_no_context "'RUN apt-key add|adv' in use!" \
 		'https://manpages.debian.org/apt-key#COMMANDS ("Instead of using this command ... /etc/apt/trusted.gpg.d/ ...")' \
 		'--' 'RUN' "$aptkeys"
@@ -138,6 +138,16 @@ if gpgs="$(grep -E '(^|[;|&])[[:space:]]*gpg[[:space:]]+[^;|&]*' <<<"$runs" | gr
 		'https://bugs.debian.org/913614#27 ("PS --batch everywhere for API mode")' \
 		'https://github.com/docker-library/busybox/pull/55' \
 		'--' 'RUN' "$gpgs"
+fi
+if aptUpgrades="$(grep -E '(^|[;|&])[[:space:]]*apt(-get)?[[:space:]]+(-[^[:space:]]*[[:space:]]+)*([a-z]+-)?upgrade' <<<"$runs")" && [ -n "$aptUpgrades" ]; then
+	oh_no_context "'RUN apt-get upgrade' (or equivalent) in use!" \
+		'https://docs.docker.com/develop/develop-images/dockerfile_best-practices/#apt-get' \
+		'--' 'RUN' "$aptUpgrades"
+fi
+if yumUpdates="$(grep -E '(^|[;|&])[[:space:]]*(yum|dnf|tdnf|microdnf)[[:space:]]+(-[^[:space:]]*[[:space:]]+)*update' <<<"$runs")" && [ -n "$yumUpdates" ]; then
+	oh_no_context "'RUN yum update' (or equivalent) in use!" \
+		'https://docs.docker.com/develop/develop-images/dockerfile_best-practices/#apt-get' \
+		'--' 'RUN' "$yumUpdates"
 fi
 
 adds="$(_filter 'ADD')"

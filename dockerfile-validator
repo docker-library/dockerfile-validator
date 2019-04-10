@@ -149,6 +149,9 @@ if yumUpdates="$(grep -E '(^|[;|&])[[:space:]]*(yum|dnf|tdnf|microdnf)[[:space:]
 		'https://docs.docker.com/develop/develop-images/dockerfile_best-practices/#apt-get' \
 		'--' 'RUN' "$yumUpdates"
 fi
+# TODO "apk upgrade" / "apk add --upgrade"
+
+# TODO complain about mixing "--no-cache" with "--update" on "apk" invocations
 
 adds="$(_filter 'ADD')"
 # https://github.com/moby/moby/blob/740349757396d8f1ad573d4b78148baca9c979aa/pkg/urlutil/urlutil.go#L12 (valid prefixes for ADD <url>)
@@ -311,6 +314,8 @@ if debianFrontend="$(grep 'DEBIAN_FRONTEND' <<<"$df")" && [ -n "$debianFrontend"
 		'https://github.com/moby/moby/issues/4032#issuecomment-34597177' \
 		'--' '' "$debianFrontend"
 fi
+
+# TODO check for "pecl install foo1 foo2" and/or "gpg --recv-keys key1 key2"
 
 if [ "$ohNoes" -gt "$maxErrors" ]; then
 	ohNoes="$maxErrors"

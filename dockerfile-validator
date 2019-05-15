@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# TODO allow multiple files in "$@"
+
 [ "$#" -le 1 ]
 df="$(cat "$@")"
 dfName="${1:-${DOCKERFILE_VALIDATOR_LABEL:-stdin}}"
@@ -150,6 +152,7 @@ if yumUpdates="$(grep -E '(^|[;|&])[[:space:]]*(yum|dnf|tdnf|microdnf)[[:space:]
 		'--' 'RUN' "$yumUpdates"
 fi
 # TODO "apk upgrade" / "apk add --upgrade"
+# TODO "apt-get clean"
 
 # TODO complain about mixing "--no-cache" with "--update" on "apk" invocations
 

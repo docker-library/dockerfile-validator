@@ -156,6 +156,8 @@ fi
 
 # TODO complain about mixing "--no-cache" with "--update" on "apk" invocations
 
+# TODO catch "curl" without "-f" / "--fail"
+
 adds="$(_filter 'ADD')"
 # https://github.com/moby/moby/blob/740349757396d8f1ad573d4b78148baca9c979aa/pkg/urlutil/urlutil.go#L12 (valid prefixes for ADD <url>)
 if urls="$(grep -E '^(--[^[:space:]]*[[:space:]]+)*https?://' <<<"$adds")" && [ -n "$urls" ]; then

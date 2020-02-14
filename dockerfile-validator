@@ -124,6 +124,8 @@ _filter() {
 	' <<<"$df"
 }
 
+# TODO warn about "FROM ...:latest" (explicit or implied, and also check "COPY --from=...")
+
 runs="$(_filter 'RUN')"
 if chowns="$(grep -E '^ch(own|mod)[[:space:]]+.*' <<<"$runs")" && [ -n "$chowns" ]; then
 	oh_no_context "'RUN chown'/'RUN chmod' in use!" \
@@ -155,6 +157,7 @@ fi
 # TODO "apt-get clean"
 
 # TODO complain about mixing "--no-cache" with "--update" on "apk" invocations
+# TODO complain about missing "--no-network" on "apk del"
 
 # TODO catch "curl" without "-f" / "--fail"
 

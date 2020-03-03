@@ -156,7 +156,7 @@ fi
 if aptInstalls="$(grep -E '(^|[;|&])[[:space:]]*apt(-get)?[[:space:]]+(-[^[:space:]]*[[:space:]]+)*([a-z]+-)?install' <<<"$runs")" && [ -n "$aptInstalls" ]; then
 	if essential="$(grep 'build-essential' <<<"$aptInstalls")" && [ -n "$essential" ]; then
 		# TODO determine whether we're actually building Debian packages in this `RUN` line before we blanket complain about this
-		oh_no_context "'RUN apt-get install build-essential' seems to be in use!" \
+		oh_no_context "'RUN apt-get install build-essential' should be replaced by more specific dependencies such as 'make' and 'gcc' (unless building Debian packages)" \
 			'https://packages.debian.org/unstable/build-essential' \
 			'--' 'RUN' "$essential"
 	fi

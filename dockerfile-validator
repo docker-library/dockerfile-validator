@@ -153,6 +153,14 @@ if yumUpdates="$(grep -E '(^|[;|&])[[:space:]]*(yum|dnf|tdnf|microdnf)[[:space:]
 		'https://docs.docker.com/develop/develop-images/dockerfile_best-practices/#apt-get' \
 		'--' 'RUN' "$yumUpdates"
 fi
+if aptInstalls="$(grep -E '(^|[;|&])[[:space:]]*apt(-get)?[[:space:]]+(-[^[:space:]]*[[:space:]]+)*([a-z]+-)?install' <<<"$runs")" && [ -n "$aptInstalls" ]; then
+	if essential="$(grep 'build-essential' <<<"$aptInstalls")" && [ -n "$essential" ]; then
+		# TODO determine whether we're actually building Debian packages in this `RUN` line before we blanket complain about this
+		oh_no_context "'RUN apt-get install build-essential' seems to be in use!" \
+			'https://packages.debian.org/unstable/build-essential' \
+			'--' 'RUN' "$essential"
+	fi
+fi
 # TODO "apk upgrade" / "apk add --upgrade"
 # TODO "apt-get clean"
 

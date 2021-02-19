@@ -334,6 +334,7 @@ fi
 if debianFrontend="$(grep 'DEBIAN_FRONTEND' <<<"$df")" && [ -n "$debianFrontend" ]; then
 	oh_no_context "'DEBIAN_FRONTEND' detected; is it really necessary?" \
 		'https://github.com/moby/moby/issues/4032#issuecomment-34597177' \
+		'https://bugs.debian.org/929417 (installing "perl" leads to debconf bugs)' \
 		'--' '' "$debianFrontend"
 fi
 

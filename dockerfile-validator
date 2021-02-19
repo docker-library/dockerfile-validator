@@ -153,6 +153,7 @@ if yumUpdates="$(grep -E '(^|[;|&])[[:space:]]*(yum|dnf|tdnf|microdnf)[[:space:]
 		'https://docs.docker.com/develop/develop-images/dockerfile_best-practices/#apt-get' \
 		'--' 'RUN' "$yumUpdates"
 fi
+# TODO "apk upgrade" / "apk add --upgrade"
 if aptInstalls="$(grep -E '(^|[;|&])[[:space:]]*apt(-get)?[[:space:]]+(-[^[:space:]]*[[:space:]]+)*([a-z]+-)?install' <<<"$runs")" && [ -n "$aptInstalls" ]; then
 	if essential="$(grep 'build-essential' <<<"$aptInstalls")" && [ -n "$essential" ]; then
 		# TODO determine whether we're actually building Debian packages in this `RUN` line before we blanket complain about this
@@ -161,8 +162,13 @@ if aptInstalls="$(grep -E '(^|[;|&])[[:space:]]*apt(-get)?[[:space:]]+(-[^[:spac
 			'--' 'RUN' "$essential"
 	fi
 fi
-# TODO "apk upgrade" / "apk add --upgrade"
-# TODO "apt-get clean"
+if aptCleans="$(grep -E '(^|[;|&])[[:space:]]*apt(-get)?[[:space:]]+(-[^[:space:]]*[[:space:]]+)*([a-z]+-)?clean' <<<"$runs")" && [ -n "$aptCleans" ]; then
+	oh_no_context "'RUN apt-get clean' in use!" \
+		'https://docs.docker.com/develop/develop-images/dockerfile_best-practices/#apt-get' \
+		'https://github.com/debuerreotype/debuerreotype/blob/5cf7949ecf1cec1afece267688bda64cd34a6817/scripts/debuerreotype-minimizing-config#L85-L109' \
+		'https://github.com/tianon/docker-brew-ubuntu-core/blob/ec931883d8292935b62ac40757287491e6ff467e/focal/Dockerfile#L21-L24' \
+		'--' 'RUN' "$aptCleans"
+fi
 
 # TODO complain about mixing "--no-cache" with "--update" on "apk" invocations
 # TODO complain about missing "--no-network" on "apk del"

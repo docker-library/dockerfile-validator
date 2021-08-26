@@ -175,6 +175,14 @@ fi
 
 # TODO catch "curl" without "-f" / "--fail"
 
+if alpineGlibc="$(grep 'alpine-pkg-glibc' <<<"$df")" && [ -n "$alpineGlibc" ]; then
+	oh_no_context 'use of alpine-pkg-glibc is HIGHLY discouraged, as the results can be very unstable' \
+		'https://ariadne.space/2021/08/26/there-is-no-such-thing-as-a-glibc-based-alpine-image/' \
+		'https://gitlab.alpinelinux.org/alpine/aports/-/merge_requests/24647' \
+		'--' '' "$alpineGlibc"
+fi
+# TODO detect mixing of Alpine edge and a release, for example
+
 adds="$(_filter 'ADD')"
 # https://github.com/moby/moby/blob/740349757396d8f1ad573d4b78148baca9c979aa/pkg/urlutil/urlutil.go#L12 (valid prefixes for ADD <url>)
 if urls="$(grep -E '^(--[^[:space:]]*[[:space:]]+)*https?://' <<<"$adds")" && [ -n "$urls" ]; then
